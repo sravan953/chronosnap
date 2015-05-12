@@ -14,6 +14,8 @@ import com.nathanosman.chronosnap.R;
 
 /**
  * @author sravan953
+ *
+ * Custom preference type for setting time interval, either in seconds or minutes.
  */
 public class TimeIntervalPreference extends DialogPreference {
     Spinner spinner;
@@ -32,6 +34,21 @@ public class TimeIntervalPreference extends DialogPreference {
         spinner.setAdapter(adapter);
 
         editText = (EditText)view.findViewById(R.id.timeInterval);
+
+        /*
+        To retrieve the already persisted (or default) values.
+         */
+        SharedPreferences p = PreferenceManager.getDefaultSharedPreferences(getContext());
+        String intervalType = p.getString(getContext().getString(R.string.pref_interval_type_key), "seconds");
+        long intervalMillis = Long.parseLong(p.getString(getContext().getString(R.string.pref_interval_key), getContext().getString(R.string.pref_interval_default)));
+        int spinnerSelection = intervalType.equals("seconds") ? 0 : 1;
+        intervalMillis = intervalType.equals("seconds") ? intervalMillis / 1000 : intervalMillis / (60 * 1000);
+
+        /*
+        To instantiate the preference with already persisted (or default) values.
+         */
+        spinner.setSelection(spinnerSelection);
+        editText.setText(String.valueOf(intervalMillis));
     }
 
     @Override
@@ -39,10 +56,14 @@ public class TimeIntervalPreference extends DialogPreference {
         if(positiveResult) {
             String type = spinner.getSelectedItem().toString();
             int time = Integer.parseInt(editText.getText().toString());
+            if(type.equalsIgnoreCase("seconds"))
+                time *= 1000;
+            else
+                time *= 60 * 1000;
 
-            SharedPreferences.Editor pEditor = PreferenceManager.getDefaultSharedPreferences(getContext()).edit();
-            pEditor.putString(getContext().getResources().getString(R.string.pref_interval_type_key), type).commit();
-            pEditor.putString(getContext().getResources().getString(R.string.pref_interval_key), String.valueOf(time)).commit();
+            SharedPreferences p = PreferenceManager.getDefaultSharedPreferences(getContext());
+            p.edit().putString(getContext().getResources().getString(R.string.pref_interval_type_key), type).commit();
+            p.edit().putString(getContext().getResources().getString(R.string.pref_interval_key), String.valueOf(time)).commit();
         }
     }
 }
