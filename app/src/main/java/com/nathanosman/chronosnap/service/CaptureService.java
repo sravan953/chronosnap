@@ -9,6 +9,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.SystemClock;
 import android.preference.PreferenceManager;
 import android.support.v4.app.NotificationCompat;
 import android.support.v4.content.LocalBroadcastManager;
@@ -17,9 +18,6 @@ import android.widget.Toast;
 
 import com.nathanosman.chronosnap.R;
 import com.nathanosman.chronosnap.ui.MainActivity;
-
-import java.text.SimpleDateFormat;
-import java.util.Date;
 
 
 /**
@@ -56,6 +54,11 @@ public class CaptureService extends Service {
      * Broadcast containing capture status
      */
     public static final String BROADCAST_STATUS = "com.nathanosman.chronosnap.broadcast.STATUS";
+
+    /**
+     * Sequence name
+     */
+    public static final String EXTRA_SEQUENCE_NAME = "com.nathanosman.chronosnap.extra.SEQUENCE_NAME";
 
     /**
      * Start time of the capture
@@ -117,7 +120,8 @@ public class CaptureService extends Service {
                     broadcastStatus();
                     break;
                 case ACTION_START_CAPTURE:
-                    startCapture();
+                    CharSequence sequenceName = intent.getCharSequenceExtra(EXTRA_SEQUENCE_NAME);
+                    startCapture(sequenceName);
                     break;
                 case ACTION_STOP_CAPTURE:
                     stopCapture();
@@ -158,8 +162,9 @@ public class CaptureService extends Service {
 
     /**
      * Start capturing a sequence of images
+     * @param sequenceName name selected for the sequence
      */
-    private void startCapture() {
+    private void startCapture(CharSequence sequenceName) {
 
         // Prevent a new capture from being started if one is in progress
         if (mStartTime != 0) {
@@ -173,7 +178,7 @@ public class CaptureService extends Service {
         createNotification();
 
         // Set the start time and reset the index
-        mStartTime = System.currentTimeMillis();
+        mStartTime = SystemClock.elapsedRealtime();
         mIndex = 0;
 
         // Load the current settings
@@ -184,17 +189,12 @@ public class CaptureService extends Service {
         int cameraId = Integer.parseInt(pref(R.string.pref_camera_key, R.string.pref_camera_default));
         boolean autofocus = pref(R.string.pref_focus_key, R.string.pref_focus_default).equals("auto");
 
-        // TODO: user should be able to select the sequence name
-
-        // Generate a name for the sequence based on the current date and time
-        String sequenceName = new SimpleDateFormat("yyyymmdd_hhmmss").format(new Date());
-
         // Initialize the capturer
-        mImageCapturer = new ImageCapturer(cameraId, autofocus, sequenceName);
+        mImageCapturer = new ImageCapturer(this, cameraId, autofocus, sequenceName);
 
         // Broadcast the new status (that the capture has started) and set an alarm
         broadcastStatus();
-        setAlarm(System.currentTimeMillis() + mInterval);
+        setAlarm(mStartTime + mInterval);
     }
 
     /**
@@ -214,7 +214,6 @@ public class CaptureService extends Service {
             mPendingShutdown = true;
         } else {
 
-            // TODO: this doesn't do anything currently but will be needed later
             mImageCapturer.close();
             shutdown();
         }
@@ -228,10 +227,10 @@ public class CaptureService extends Service {
      */
     private void capture() {
 
-        log("Capturing image #" + String.valueOf(mIndex) + ".");
-
         // Grab the current time for calculating the next alarm interval later
-        final long captureTime = System.currentTimeMillis();
+        final long captureTime = SystemClock.elapsedRealtime();
+
+        log("Capturing image #" + String.valueOf(mIndex) + " @ " + String.valueOf(captureTime) + ".");
 
         // Signal that the capture is in progress
         mCaptureInProgress = true;
@@ -277,8 +276,10 @@ public class CaptureService extends Service {
                     mIndex++;
                     broadcastStatus();
 
-                    // TODO: check to see if closing the camera is necessary
-                    mImageCapturer.close();
+                    // If the interval is greater than 10s, close the camera - otherwise keep it open
+                    if (mInterval > 10000) {
+                        mImageCapturer.close();
+                    }
 
                     // Set an alarm for the next capture
                     setAlarm(captureTime + mInterval);
@@ -344,12 +345,14 @@ public class CaptureService extends Service {
      */
     private void setAlarm(long triggerAtMillis) {
 
+        log("Setting alarm for " + String.valueOf(triggerAtMillis) + ".");
+
         // For KitKat and newer devices, we need to use setExact or we don't
         // end up with the same level of precision as earlier versions
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-            mAlarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerAtMillis, mCaptureIntent);
+            mAlarmManager.setExact(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAtMillis, mCaptureIntent);
         } else {
-            mAlarmManager.set(AlarmManager.RTC_WAKEUP, triggerAtMillis, mCaptureIntent);
+            mAlarmManager.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAtMillis, mCaptureIntent);
         }
     }
 
@@ -362,7 +365,7 @@ public class CaptureService extends Service {
      */
     private void shutdown() {
 
-        log("Shutting down service.");
+        log("Shutting down capture.");
 
         // Cancel any pending alarms and leave the foreground
         mAlarmManager.cancel(mCaptureIntent);
@@ -371,8 +374,5 @@ public class CaptureService extends Service {
         // Reset the start time and broadcast this status
         mStartTime = 0;
         broadcastStatus();
-
-        // Stop the service since there is no need to keep it running
-        stopSelf();
     }
 }
